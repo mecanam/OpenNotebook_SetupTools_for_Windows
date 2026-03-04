@@ -246,25 +246,42 @@ try {
     exit 1
 }
 
-# --- ステップ8: 暗号化キー自動生成＆書き込み ---
+# --- ステップ8: 暗号化キー自動生成＆環境変数設定 ---
 try {
     $composePath = Join-Path $InstallDir "docker-compose.yml"
     $composeContent = Get-Content -Path $composePath -Raw
+    $modified = $false
 
+    # 暗号化キーの自動生成
     if ($composeContent -match "OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string") {
-        # ランダムな32文字の英数字文字列を生成
         $chars = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
         $encryptionKey = -join ((1..32) | ForEach-Object { $chars[(Get-Random -Maximum $chars.Length)] })
 
         $composeContent = $composeContent -replace "OPEN_NOTEBOOK_ENCRYPTION_KEY=change-me-to-a-secret-string", "OPEN_NOTEBOOK_ENCRYPTION_KEY=$encryptionKey"
-        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
-        [System.IO.File]::WriteAllText($composePath, $composeContent, $utf8NoBom)
+        $modified = $true
         Write-Host "[OK] 暗号化キーを自動生成して設定しました。" -ForegroundColor Green
     } else {
         Write-Host "[OK] 暗号化キーは既にカスタム値が設定されています。スキップします。" -ForegroundColor Green
     }
+
+    # OLLAMA_BASE_URL の追加（ホスト上の Ollama にコンテナからアクセスするための設定）
+    if ($composeContent -notmatch "OLLAMA_BASE_URL") {
+        $composeContent = $composeContent.Replace(
+            "- SURREAL_DATABASE=open_notebook",
+            "- SURREAL_DATABASE=open_notebook`n      - OLLAMA_BASE_URL=http://host.docker.internal:11434"
+        )
+        $modified = $true
+        Write-Host "[OK] OLLAMA_BASE_URL を設定しました (http://host.docker.internal:11434)" -ForegroundColor Green
+    } else {
+        Write-Host "[OK] OLLAMA_BASE_URL は既に設定されています。スキップします。" -ForegroundColor Green
+    }
+
+    if ($modified) {
+        $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+        [System.IO.File]::WriteAllText($composePath, $composeContent, $utf8NoBom)
+    }
 } catch {
-    Write-Host "【エラー】ステップ8: 暗号化キーの設定に失敗しました: $_" -ForegroundColor Red
+    Write-Host "【エラー】ステップ8: 環境変数の設定に失敗しました: $_" -ForegroundColor Red
     exit 1
 }
 
